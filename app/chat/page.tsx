@@ -17,7 +17,6 @@ interface Message {
 
 type ConnectionStatus = "idle" | "searching" | "connected" | "disconnected";
 
-// Simulated stranger responses for demo
 const STRANGER_RESPONSES = [
   "Hey! Nice to meet you!",
   "Hi there! How are you doing today?",
@@ -38,7 +37,6 @@ export default function ChatPage() {
   const [onlineCount, setOnlineCount] = useState(2847);
   const [selectedGender, setSelectedGender] = useState<Gender>("anyone");
 
-  // Simulate online count changes
   useEffect(() => {
     const interval = setInterval(() => {
       setOnlineCount((prev) => prev + Math.floor(Math.random() * 10) - 5);
@@ -46,54 +44,40 @@ export default function ChatPage() {
     return () => clearInterval(interval);
   }, []);
 
-const startNewChat = useCallback(async () => {
-  alert("Start Chat clicked");
+  const startNewChat = useCallback(async () => {
+    alert("Start Chat clicked");
 
-  setMessages([]);
-  setStatus("searching");
-  setIsTyping(false);
+    setMessages([]);
+    setStatus("searching");
+    setIsTyping(false);
 
-  const userId = crypto.randomUUID();
+    const userId = crypto.randomUUID();
 
-  const { data, error } = await supabase.from("waiting_users").insert([
-    {
-      id: userId,
-      gender: selectedGender,
-      preference: "anyone",
-    },
-  ]);
+    const { data, error } = await supabase.from("waiting_users").insert([
+      {
+        id: userId,
+        gender: selectedGender,
+        preference: "anyone",
+      },
+    ]);
 
-  alert("Insert finished");
+    alert("Insert finished");
 
-  console.log("Inserted into waiting_users:", data, error);
+    console.log("Inserted into waiting_users:", data, error);
 
-  if (error) {
-    alert("Insert error: " + error.message);
-    console.error("Error adding user to waiting list:", error);
-    setStatus("idle");
-    return;
-  }
+    if (error) {
+      alert("Insert error: " + error.message);
+      console.error("Error adding user to waiting list:", error);
+      setStatus("idle");
+      return;
+    }
 
-  alert("Insert success");
+    alert("Insert success");
 
-  setTimeout(() => {
-    setStatus("connected");
-  }, 2000);
-}, [selectedGender]);
-
-  console.log("Inserted into waiting_users:", data, error);
-
-  if (error) {
-    console.error("Error adding user to waiting list:", error);
-    setStatus("idle");
-    return;
-  }
-
-  // Temporary fake connect after insert
-  setTimeout(() => {
-    setStatus("connected");
-  }, 2000);
-}, [selectedGender]);
+    setTimeout(() => {
+      setStatus("connected");
+    }, 2000);
+  }, [selectedGender]);
 
   const endChat = useCallback(() => {
     setStatus("idle");
@@ -118,14 +102,12 @@ const startNewChat = useCallback(async () => {
 
       setMessages((prev) => [...prev, userMessage]);
 
-      // Simulate stranger typing and response
       setIsTyping(true);
 
       const responseDelay = 1500 + Math.random() * 2000;
       setTimeout(() => {
         setIsTyping(false);
 
-        // Small chance stranger disconnects
         if (Math.random() < 0.05) {
           setStatus("disconnected");
           return;
@@ -161,7 +143,6 @@ const startNewChat = useCallback(async () => {
 
   return (
     <div className="h-screen flex bg-background overflow-hidden">
-      {/* Sidebar */}
       <ChatSidebar
         onNewChat={startNewChat}
         isConnected={status === "connected"}
@@ -170,15 +151,9 @@ const startNewChat = useCallback(async () => {
         onGenderChange={setSelectedGender}
       />
 
-      {/* Main Chat Area */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Header */}
         <ChatHeader status={status} onNextChat={nextChat} onEndChat={endChat} />
-
-        {/* Chat Messages */}
         <ChatArea messages={messages} status={status} isTyping={isTyping} />
-
-        {/* Input */}
         <MessageInput
           onSend={sendMessage}
           disabled={status !== "connected"}
