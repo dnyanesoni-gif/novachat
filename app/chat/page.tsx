@@ -46,7 +46,9 @@ export default function ChatPage() {
     return () => clearInterval(interval);
   }, []);
 
-  const startNewChat = useCallback(async () => {
+const startNewChat = useCallback(async () => {
+  alert("Start Chat clicked");
+
   setMessages([]);
   setStatus("searching");
   setIsTyping(false);
@@ -60,6 +62,24 @@ export default function ChatPage() {
       preference: "anyone",
     },
   ]);
+
+  alert("Insert finished");
+
+  console.log("Inserted into waiting_users:", data, error);
+
+  if (error) {
+    alert("Insert error: " + error.message);
+    console.error("Error adding user to waiting list:", error);
+    setStatus("idle");
+    return;
+  }
+
+  alert("Insert success");
+
+  setTimeout(() => {
+    setStatus("connected");
+  }, 2000);
+}, [selectedGender]);
 
   console.log("Inserted into waiting_users:", data, error);
 
