@@ -1,5 +1,6 @@
 "use client";
 
+import { supabase } from "@/lib/supabaseClient";
 import { useState, useCallback, useEffect } from "react";
 import { ChatSidebar } from "@/components/chat/sidebar";
 import type { Gender } from "@/components/chat/gender-selector";
@@ -45,16 +46,34 @@ export default function ChatPage() {
     return () => clearInterval(interval);
   }, []);
 
-  const startNewChat = useCallback(() => {
-    setMessages([]);
-    setStatus("searching");
-    setIsTyping(false);
+  const startNewChat = useCallback(async () => {
+  setMessages([]);
+  setStatus("searching");
+  setIsTyping(false);
 
-    // Simulate finding a stranger
-    setTimeout(() => {
-      setStatus("connected");
-    }, 2000 + Math.random() * 2000);
-  }, []);
+  const userId = crypto.randomUUID();
+
+  const { data, error } = await supabase.from("waiting_users").insert([
+    {
+      id: userId,
+      gender: selectedGender,
+      preference: "anyone",
+    },
+  ]);
+
+  console.log("Inserted into waiting_users:", data, error);
+
+  if (error) {
+    console.error("Error adding user to waiting list:", error);
+    setStatus("idle");
+    return;
+  }
+
+  // Temporary fake connect after insert
+  setTimeout(() => {
+    setStatus("connected");
+  }, 2000);
+}, [selectedGender]);
 
   const endChat = useCallback(() => {
     setStatus("idle");
