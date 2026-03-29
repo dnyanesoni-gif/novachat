@@ -102,6 +102,31 @@ export default function ChatPage() {
     };
   }, [currentRoomId, currentUserId, loadMessages]);
 
+  // Poll for room if user is waiting
+  useEffect(() => {
+    if (!currentUserId || status !== "searching" || currentRoomId) return;
+
+    const interval = setInterval(async () => {
+      const { data, error } = await supabase
+        .from("chat_rooms")
+        .select("*")
+        .or(`user1.eq.${currentUserId},user2.eq.${currentUserId}`)
+        .limit(1);
+
+      if (error) {
+        console.error("Error checking chat room:", error);
+        return;
+      }
+
+      if (data && data.length > 0) {
+        setCurrentRoomId(data[0].id);
+        setStatus("connected");
+      }
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [currentUserId, status, currentRoomId]);
+
   const startNewChat = useCallback(async () => {
     if (!currentUserId) return;
 
