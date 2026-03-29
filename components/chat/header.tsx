@@ -44,29 +44,31 @@ export function ChatHeader({ status, onNextChat, onEndChat }: ChatHeaderProps) {
   const statusInfo = getStatusInfo();
 
   return (
-    <div className="h-16 px-4 md:px-6 flex items-center justify-between bg-card border-b border-border">
-      {/* Status */}
-      <div className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center">
+    <div className="h-16 shrink-0 px-4 md:px-6 flex items-center justify-between bg-card border-b border-border">
+      <div className="flex items-center gap-3 min-w-0">
+        <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center shrink-0">
           <User className="w-5 h-5 text-muted-foreground" />
         </div>
-        <div>
+        <div className="min-w-0">
           <div className="flex items-center gap-2">
             <div
               className={`w-2 h-2 rounded-full ${statusInfo.color} ${
                 statusInfo.animate ? "animate-pulse" : ""
               }`}
             />
-            <span className="font-medium text-foreground">{statusInfo.text}</span>
+            <span className="font-medium text-foreground truncate">
+              {statusInfo.text}
+            </span>
           </div>
           {status === "connected" && (
-            <span className="text-xs text-muted-foreground">Anonymous User</span>
+            <span className="text-xs text-muted-foreground">
+              Anonymous User
+            </span>
           )}
         </div>
       </div>
 
-      {/* Actions */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 shrink-0">
         <Button
           onClick={onNextChat}
           variant="outline"
