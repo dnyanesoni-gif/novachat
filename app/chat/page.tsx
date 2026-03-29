@@ -17,6 +17,8 @@ interface Message {
 
 type ConnectionStatus = "idle" | "searching" | "connected" | "disconnected";
 
+const TEST_ROOM_ID = "global-test-room-999";
+
 export default function ChatPage() {
   const [status, setStatus] = useState<ConnectionStatus>("idle");
   const [messages, setMessages] = useState<Message[]>([]);
@@ -24,7 +26,6 @@ export default function ChatPage() {
   const [onlineCount, setOnlineCount] = useState(2847);
   const [selectedGender, setSelectedGender] = useState<Gender>("anyone");
   const [currentUserId, setCurrentUserId] = useState("");
-  const [currentRoomId, setCurrentRoomId] = useState<string | null>(null);
 
   useEffect(() => {
     setCurrentUserId(crypto.randomUUID());
@@ -37,45 +38,39 @@ export default function ChatPage() {
     return () => clearInterval(interval);
   }, []);
 
-  const loadMessages = useCallback(
-    async (roomId: string) => {
-      const { data, error } = await supabase
-        .from("messages")
-        .select("*")
-        .eq("room_id", roomId)
-        .order("created_at", { ascending: true });
+  const loadMessages = useCallback(async () => {
+    const { data, error } = await supabase
+      .from("messages")
+      .select("*")
+      .eq("room_id", TEST_ROOM_ID)
+      .order("created_at", { ascending: true });
 
-      if (error) {
-        console.error("Error loading messages:", error);
-        return;
-      }
+    if (error) return;
 
-      const formatted: Message[] = (data || []).map((msg: any) => ({
+    setMessages(
+      (data || []).map((msg: any) => ({
         id: msg.id,
         text: msg.message,
         sender: msg.sender === currentUserId ? "user" : "stranger",
         timestamp: new Date(msg.created_at),
-      }));
-
-      setMessages(formatted);
-    },
-    [currentUserId]
-  );
+      }))
+    );
+  }, [currentUserId]);
 
   useEffect(() => {
-    if (!currentRoomId) return;
+    if (status !== "connected") return;
 
-    loadMessages(currentRoomId);
+    loadMessages();
 
     const channel = supabase
-      .channel(`messages-${currentRoomId}`)
+      .channel(`room-${TEST_ROOM_ID}`)
       .on(
         "postgres_changes",
         {
           event: "INSERT",
           schema: "public",
           table: "messages",
-          filter: `room_id=eq.${currentRoomId}`,
+          filter: `room_id=eq.${TEST_ROOM_ID}`,
         },
         (payload) => {
           const msg = payload.new as any;
@@ -98,134 +93,39 @@ export default function ChatPage() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [currentRoomId, currentUserId, loadMessages]);
+  }, [status, currentUserId, loadMessages]);
 
-  useEffect(() => {
-    if (!currentUserId || status !== "searching" || currentRoomId) return;
-
-    const interval = setInterval(async () => {
-      const { data, error } = await supabase
-        .from("chat_rooms")
-        .select("*")
-        .or(`user1.eq.${currentUserId},user2.eq.${currentUserId}`)
-        .order("created_at", { ascending: false })
-        .limit(1);
-
-      if (error) {
-        console.error("Error polling room:", error);
-        return;
-      }
-
-      if (data && data.length > 0) {
-        setCurrentRoomId(String(data[0].id));
-        setStatus("connected");
-      }
-    }, 1500);
-
-    return () => clearInterval(interval);
-  }, [currentUserId, status, currentRoomId]);
-
-  const startNewChat = useCallback(async () => {
-    if (!currentUserId) return;
-
+  const startNewChat = useCallback(() => {
     setMessages([]);
-    setCurrentRoomId(null);
     setStatus("searching");
 
-    // remove old waiting entry of this user
-    await supabase.from("waiting_users").delete().eq("id", currentUserId);
+    setTimeout(() => {
+      setStatus("connected");
+    }, 1000);
+  }, []);
 
-    // check if someone else is waiting
-    const { data: waitingUsers, error: waitingError } = await supabase
-      .from("waiting_users")
-      .select("*")
-      .neq("id", currentUserId)
-      .order("created_at", { ascending: true })
-      .limit(1);
-
-    if (waitingError) {
-      console.error("Waiting fetch error:", waitingError);
-      setStatus("idle");
-      return;
-    }
-
-    if (waitingUsers && waitingUsers.length > 0) {
-      const partner = waitingUsers[0];
-
-      const { data: roomData, error: roomError } = await supabase
-        .from("chat_rooms")
-        .insert([
-          {
-            user1: partner.id,
-            user2: currentUserId,
-          },
-        ])
-        .select();
-
-      if (roomError) {
-        console.error("Room create error:", roomError);
-        setStatus("idle");
-        return;
-      }
-
-      await supabase.from("waiting_users").delete().eq("id", partner.id);
-
-      if (roomData && roomData.length > 0) {
-        setCurrentRoomId(String(roomData[0].id));
-        setStatus("connected");
-      }
-
-      return;
-    }
-
-    const { error: insertError } = await supabase.from("waiting_users").insert([
-      {
-        id: currentUserId,
-        gender: selectedGender,
-        preference: "anyone",
-      },
-    ]);
-
-    if (insertError) {
-      console.error("Insert waiting user error:", insertError);
-      setStatus("idle");
-    }
-  }, [currentUserId, selectedGender]);
-
-  const endChat = useCallback(async () => {
-    if (currentUserId) {
-      await supabase.from("waiting_users").delete().eq("id", currentUserId);
-    }
-
+  const endChat = useCallback(() => {
     setStatus("idle");
     setMessages([]);
-    setCurrentRoomId(null);
-  }, [currentUserId]);
+  }, []);
 
-  const nextChat = useCallback(async () => {
-    await endChat();
-    setTimeout(() => {
-      startNewChat();
-    }, 300);
-  }, [endChat, startNewChat]);
+  const nextChat = useCallback(() => {
+    startNewChat();
+  }, [startNewChat]);
 
   const sendMessage = useCallback(
     async (text: string) => {
-      if (!currentRoomId || !currentUserId || status !== "connected") return;
+      if (status !== "connected" || !currentUserId) return;
 
-      const { error } = await supabase.from("messages").insert([
+      await supabase.from("messages").insert([
         {
-          room_id: currentRoomId,
+          room_id: TEST_ROOM_ID,
           sender: currentUserId,
           message: text,
         },
       ]);
-
-      if (error) {
-        console.error("Message send error:", error);
-      }
     },
-    [currentRoomId, currentUserId, status]
+    [status, currentUserId]
   );
 
   const getInputPlaceholder = () => {
@@ -234,8 +134,6 @@ export default function ChatPage() {
         return "Start a chat to begin messaging...";
       case "searching":
         return "Finding someone to chat with...";
-      case "disconnected":
-        return "Stranger disconnected. Click Next to find someone new.";
       default:
         return "Type your message...";
     }
