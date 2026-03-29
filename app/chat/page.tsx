@@ -38,13 +38,72 @@ export default function ChatPage() {
     setCurrentUserId(userId);
   }, []);
 
-  const startNewChat = useCallback(async () => {
-    if (!currentUserId) {
-      alert("No current user id");
-      return;
-    }
+  const loadMessages = useCallback(
+    async (roomId: string) => {
+      const { data, error } = await supabase
+        .from("messages")
+        .select("*")
+        .eq("room_id", roomId)
+        .order("created_at", { ascending: true });
 
-    alert("Start chat clicked");
+      if (error) {
+        console.error("Error loading messages:", error);
+        return;
+      }
+
+      const formattedMessages: Message[] = (data || []).map((msg: any) => ({
+        id: msg.id,
+        text: msg.message,
+        sender: msg.sender === currentUserId ? "user" : "stranger",
+        timestamp: new Date(msg.created_at),
+      }));
+
+      setMessages(formattedMessages);
+    },
+    [currentUserId]
+  );
+
+  useEffect(() => {
+    if (!currentRoomId) return;
+
+    loadMessages(currentRoomId);
+
+    const channel = supabase
+      .channel(`room-${currentRoomId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "messages",
+          filter: `room_id=eq.${currentRoomId}`,
+        },
+        (payload) => {
+          const msg = payload.new as any;
+
+          const newMessage: Message = {
+            id: msg.id,
+            text: msg.message,
+            sender: msg.sender === currentUserId ? "user" : "stranger",
+            timestamp: new Date(msg.created_at),
+          };
+
+          setMessages((prev) => {
+            const alreadyExists = prev.some((m) => m.id === newMessage.id);
+            if (alreadyExists) return prev;
+            return [...prev, newMessage];
+          });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [currentRoomId, currentUserId, loadMessages]);
+
+  const startNewChat = useCallback(async () => {
+    if (!currentUserId) return;
 
     setMessages([]);
     setStatus("searching");
@@ -58,17 +117,13 @@ export default function ChatPage() {
       .limit(1);
 
     if (fetchError) {
-      alert("Fetch waiting users error: " + fetchError.message);
-      console.error(fetchError);
+      console.error("Error fetching waiting users:", fetchError);
       setStatus("idle");
       return;
     }
 
-    alert("Waiting users found: " + (waitingUsers?.length || 0));
-
     if (waitingUsers && waitingUsers.length > 0) {
       const partner = waitingUsers[0];
-      alert("Partner found: " + partner.id);
 
       const { data: roomData, error: roomError } = await supabase
         .from("chat_rooms")
@@ -81,13 +136,10 @@ export default function ChatPage() {
         .select();
 
       if (roomError) {
-        alert("Room create error: " + roomError.message);
-        console.error(roomError);
+        console.error("Error creating room:", roomError);
         setStatus("idle");
         return;
       }
-
-      alert("Room created");
 
       const { error: deleteError } = await supabase
         .from("waiting_users")
@@ -95,16 +147,12 @@ export default function ChatPage() {
         .eq("id", partner.id);
 
       if (deleteError) {
-        alert("Delete waiting user error: " + deleteError.message);
-        console.error(deleteError);
-      } else {
-        alert("Waiting user deleted");
+        console.error("Error deleting waiting user:", deleteError);
       }
 
       if (roomData && roomData.length > 0) {
         setCurrentRoomId(roomData[0].id);
         setStatus("connected");
-        alert("Connected!");
       }
 
       return;
@@ -119,13 +167,10 @@ export default function ChatPage() {
     ]);
 
     if (insertError) {
-      alert("Insert waiting user error: " + insertError.message);
-      console.error(insertError);
+      console.error("Error adding waiting user:", insertError);
       setStatus("idle");
       return;
     }
-
-    alert("User added to waiting list");
   }, [selectedGender, currentUserId]);
 
   const endChat = useCallback(() => {
@@ -143,15 +188,6 @@ export default function ChatPage() {
     async (text: string) => {
       if (status !== "connected" || !currentRoomId || !currentUserId) return;
 
-      const userMessage: Message = {
-        id: `user-${Date.now()}`,
-        text,
-        sender: "user",
-        timestamp: new Date(),
-      };
-
-      setMessages((prev) => [...prev, userMessage]);
-
       const { error } = await supabase.from("messages").insert([
         {
           room_id: currentRoomId,
@@ -161,7 +197,6 @@ export default function ChatPage() {
       ]);
 
       if (error) {
-        alert("Message insert error: " + error.message);
         console.error("Error sending message:", error);
       }
     },
