@@ -20,22 +20,21 @@ type ConnectionStatus = "idle" | "searching" | "connected" | "disconnected";
 export default function ChatPage() {
   const [status, setStatus] = useState<ConnectionStatus>("idle");
   const [messages, setMessages] = useState<Message[]>([]);
-  const [isTyping, setIsTyping] = useState(false);
+  const [isTyping] = useState(false);
   const [onlineCount, setOnlineCount] = useState(2847);
   const [selectedGender, setSelectedGender] = useState<Gender>("anyone");
-  const [currentUserId, setCurrentUserId] = useState<string>("");
+  const [currentUserId, setCurrentUserId] = useState("");
   const [currentRoomId, setCurrentRoomId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setCurrentUserId(crypto.randomUUID());
+  }, []);
 
   useEffect(() => {
     const interval = setInterval(() => {
       setOnlineCount((prev) => prev + Math.floor(Math.random() * 10) - 5);
     }, 5000);
     return () => clearInterval(interval);
-  }, []);
-
-  useEffect(() => {
-    const userId = crypto.randomUUID();
-    setCurrentUserId(userId);
   }, []);
 
   const loadMessages = useCallback(
@@ -51,14 +50,14 @@ export default function ChatPage() {
         return;
       }
 
-      const formattedMessages: Message[] = (data || []).map((msg: any) => ({
+      const formatted: Message[] = (data || []).map((msg: any) => ({
         id: msg.id,
         text: msg.message,
         sender: msg.sender === currentUserId ? "user" : "stranger",
         timestamp: new Date(msg.created_at),
       }));
 
-      setMessages(formattedMessages);
+      setMessages(formatted);
     },
     [currentUserId]
   );
@@ -69,7 +68,7 @@ export default function ChatPage() {
     loadMessages(currentRoomId);
 
     const channel = supabase
-      .channel(`room-${currentRoomId}`)
+      .channel(`messages-${currentRoomId}`)
       .on(
         "postgres_changes",
         {
@@ -89,8 +88,7 @@ export default function ChatPage() {
           };
 
           setMessages((prev) => {
-            const alreadyExists = prev.some((m) => m.id === newMessage.id);
-            if (alreadyExists) return prev;
+            if (prev.some((m) => m.id === newMessage.id)) return prev;
             return [...prev, newMessage];
           });
         }
@@ -102,7 +100,6 @@ export default function ChatPage() {
     };
   }, [currentRoomId, currentUserId, loadMessages]);
 
-  // Poll for room if user is waiting
   useEffect(() => {
     if (!currentUserId || status !== "searching" || currentRoomId) return;
 
@@ -111,18 +108,19 @@ export default function ChatPage() {
         .from("chat_rooms")
         .select("*")
         .or(`user1.eq.${currentUserId},user2.eq.${currentUserId}`)
+        .order("created_at", { ascending: false })
         .limit(1);
 
       if (error) {
-        console.error("Error checking chat room:", error);
+        console.error("Error polling room:", error);
         return;
       }
 
       if (data && data.length > 0) {
-        setCurrentRoomId(data[0].id);
+        setCurrentRoomId(String(data[0].id));
         setStatus("connected");
       }
-    }, 2000);
+    }, 1500);
 
     return () => clearInterval(interval);
   }, [currentUserId, status, currentRoomId]);
@@ -131,18 +129,22 @@ export default function ChatPage() {
     if (!currentUserId) return;
 
     setMessages([]);
-    setStatus("searching");
-    setIsTyping(false);
     setCurrentRoomId(null);
+    setStatus("searching");
 
-    const { data: waitingUsers, error: fetchError } = await supabase
+    // remove old waiting entry of this user
+    await supabase.from("waiting_users").delete().eq("id", currentUserId);
+
+    // check if someone else is waiting
+    const { data: waitingUsers, error: waitingError } = await supabase
       .from("waiting_users")
       .select("*")
       .neq("id", currentUserId)
+      .order("created_at", { ascending: true })
       .limit(1);
 
-    if (fetchError) {
-      console.error("Error fetching waiting users:", fetchError);
+    if (waitingError) {
+      console.error("Waiting fetch error:", waitingError);
       setStatus("idle");
       return;
     }
@@ -161,22 +163,15 @@ export default function ChatPage() {
         .select();
 
       if (roomError) {
-        console.error("Error creating room:", roomError);
+        console.error("Room create error:", roomError);
         setStatus("idle");
         return;
       }
 
-      const { error: deleteError } = await supabase
-        .from("waiting_users")
-        .delete()
-        .eq("id", partner.id);
-
-      if (deleteError) {
-        console.error("Error deleting waiting user:", deleteError);
-      }
+      await supabase.from("waiting_users").delete().eq("id", partner.id);
 
       if (roomData && roomData.length > 0) {
-        setCurrentRoomId(roomData[0].id);
+        setCurrentRoomId(String(roomData[0].id));
         setStatus("connected");
       }
 
@@ -192,26 +187,31 @@ export default function ChatPage() {
     ]);
 
     if (insertError) {
-      console.error("Error adding waiting user:", insertError);
+      console.error("Insert waiting user error:", insertError);
       setStatus("idle");
-      return;
     }
-  }, [selectedGender, currentUserId]);
+  }, [currentUserId, selectedGender]);
 
-  const endChat = useCallback(() => {
+  const endChat = useCallback(async () => {
+    if (currentUserId) {
+      await supabase.from("waiting_users").delete().eq("id", currentUserId);
+    }
+
     setStatus("idle");
     setMessages([]);
-    setIsTyping(false);
     setCurrentRoomId(null);
-  }, []);
+  }, [currentUserId]);
 
-  const nextChat = useCallback(() => {
-    startNewChat();
-  }, [startNewChat]);
+  const nextChat = useCallback(async () => {
+    await endChat();
+    setTimeout(() => {
+      startNewChat();
+    }, 300);
+  }, [endChat, startNewChat]);
 
   const sendMessage = useCallback(
     async (text: string) => {
-      if (status !== "connected" || !currentRoomId || !currentUserId) return;
+      if (!currentRoomId || !currentUserId || status !== "connected") return;
 
       const { error } = await supabase.from("messages").insert([
         {
@@ -222,10 +222,10 @@ export default function ChatPage() {
       ]);
 
       if (error) {
-        console.error("Error sending message:", error);
+        console.error("Message send error:", error);
       }
     },
-    [status, currentRoomId, currentUserId]
+    [currentRoomId, currentUserId, status]
   );
 
   const getInputPlaceholder = () => {
@@ -251,7 +251,7 @@ export default function ChatPage() {
         onGenderChange={setSelectedGender}
       />
 
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 h-screen">
         <ChatHeader status={status} onNextChat={nextChat} onEndChat={endChat} />
         <ChatArea messages={messages} status={status} isTyping={isTyping} />
         <MessageInput
